@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ROVITA｜声で入れる</title>
+<style>
+:root{color-scheme:light dark;--bg:#f6f4ef;--fg:#1f1f1f;--sub:#6b6b6b;--card:#ffffff;--line:rgba(0,0,0,.12);--accent:#3b5bdb}
+@media (prefers-color-scheme:dark){:root{--bg:#16181d;--fg:#eceef2;--sub:#9aa0aa;--card:#20232a;--line:rgba(255,255,255,.12);--accent:#7c95ff}}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg);min-height:100vh;display:flex;flex-direction:column;padding:16px;gap:12px}
+#state{font-size:15px;color:var(--sub);display:flex;align-items:center;gap:8px}
+#dot{width:12px;height:12px;border-radius:50%;background:var(--sub)}
+#dot.on{background:#e03131;animation:p 1s infinite}
+@keyframes p{50%{opacity:.35}}
+#txt{flex:1;min-height:120px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;font-size:18px;line-height:1.6;white-space:pre-wrap}
+#txt .tmp{color:var(--sub)}
+.row{display:flex;gap:10px}
+button{flex:1;font-size:17px;padding:14px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
+button.main{background:var(--accent);color:#fff;border-color:transparent}
+#note{font-size:13px;color:var(--sub)}
+</style>
+</head>
+<body>
+<div id="state"><span id="dot"></span><span id="msg">準備しています…</span></div>
+<div id="txt"></div>
+<div class="row">
+<button id="again" type="button">やり直す</button>
+<button id="done" class="main" type="button">入れる</button>
+</div>
+<div id="note">話し終わって少し黙ると、自動でROVITAのコメント欄に入って閉じます。</div>
+<script>
+(function(){
+var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+var msg = document.getElementById('msg'), dot = document.getElementById('dot'), box = document.getElementById('txt');
+var finalText = '', tmpText = '', rec = null, timer = null, sent = false, listening = false;
+var target = new URLSearchParams(location.search).get('o') || '';
+function show(){ box.innerHTML = ''; box.appendChild(document.createTextNode(finalText)); if (tmpText) { var s = document.createElement('span'); s.className = 'tmp'; s.textContent = tmpText; box.appendChild(s); } }
+function send(){
+  if (sent) return;
+  var t = (finalText + tmpText).trim();
+  if (!t) { msg.textContent = '聞き取れませんでした。「やり直す」を押してください'; return; }
+  sent = true;
+  try { if (rec) rec.stop(); } catch (e) {}
+  if (window.opener && !window.opener.closed) {
+    window.opener.postMessage({type:'rovita-mic', text:t}, target || '*');
+    msg.textContent = 'コメント欄に入れました';
+    setTimeout(function(){ window.close(); }, 300);
+  } else {
+    msg.textContent = 'ROVITAの画面が見つかりません。文字を長押ししてコピーしてください';
+    sent = false;
+  }
+}
+function start(){
+  if (!SR) { msg.textContent = 'このブラウザは声の入力に対応していません（ChromeかEdgeで開いてください）'; return; }
+  finalText = ''; tmpText = ''; sent = false; show();
+  rec = new SR(); rec.lang = 'ja-JP'; rec.continuous = true; rec.interimResults = true;
+  rec.onstart = function(){ listening = true; dot.className = 'on'; msg.textContent = '聞いています。話してください'; };
+  rec.onresult = function(e){
+    tmpText = '';
+    for (var i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalText += e.results[i][0].transcript; else tmpText += e.results[i][0].transcript;
+    }
+    show();
+    clearTimeout(timer);
+    timer = setTimeout(send, 2500);
+  };
+  rec.onerror = function(e){
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') msg.textContent = 'マイクが許可されていません。アドレスバーの鍵の印からマイクを許可してください';
+    else if (e.error === 'no-speech') msg.textContent = '声が聞こえませんでした。「やり直す」を押してください';
+    else msg.textContent = 'うまく聞き取れませんでした（' + e.error + '）';
+  };
+  rec.onend = function(){ listening = false; dot.className = ''; if (!sent && (finalText + tmpText).trim()) send(); };
+  try { rec.start(); } catch (e) { msg.textContent = '始められませんでした。「やり直す」を押してください'; }
+}
+document.getElementById('again').onclick = function(){ clearTimeout(timer); try { if (rec) rec.abort(); } catch (e) {} start(); };
+document.getElementById('done').onclick = function(){ clearTimeout(timer); send(); };
+start();
+})();
+</script>
+</body>
+</html>
