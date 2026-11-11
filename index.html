@@ -48,15 +48,29 @@ function send(){
     window.close();
   } else { msg.textContent = 'ROVITAの画面が見つかりません。文字を選んでコピーしてください'; sent = false; }
 }
+/* 11/11：重なり止め。Androidなどは、確定した文に前の分を毎回含めて返すので、前の分を含む時は置き換え、同じ物は足さない */
+function joinFinal(list){
+  var f = '';
+  for (var i = 0; i < list.length; i++) {
+    var t = list[i];
+    if (!t) continue;
+    if (f && t.indexOf(f) === 0) f = t;
+    else if (f.indexOf(t) >= 0) continue;
+    else f += t;
+  }
+  return f;
+}
 function listen(){
   if (!SR) { msg.textContent = 'このブラウザは声の入力に対応していません（ChromeかEdgeで開いてください）'; return; }
   stopRec(); kept = kept + cur + tmp; cur = ''; tmp = '';
   var r = new SR(); rec = r; r.lang = 'ja-JP'; r.continuous = true; r.interimResults = true;
   r.onstart = function(){ dot.className = 'on'; msg.textContent = '聞いています。話し終わったら「入れる」'; };
   r.onresult = function(e){
-    var f = '', t = '';
-    for (var i = 0; i < e.results.length; i++) { if (e.results[i].isFinal) f += e.results[i][0].transcript; else t += e.results[i][0].transcript; }
-    cur = f; tmp = t; show();
+    var finals = [], last = '';
+    for (var i = 0; i < e.results.length; i++) { if (e.results[i].isFinal) finals.push(e.results[i][0].transcript); else last = e.results[i][0].transcript; }
+    cur = joinFinal(finals);
+    tmp = (last && cur.indexOf(last) < 0) ? last : '';
+    show();
   };
   r.onerror = function(e){ if (e.error === 'not-allowed' || e.error === 'service-not-allowed') msg.textContent = 'マイクが許可されていません。アドレスバーの鍵の印からマイクを許可してください'; };
   r.onend = function(){ if (rec !== r) return; rec = null; dot.className = ''; kept = kept + cur + tmp; cur = ''; tmp = ''; show(); msg.textContent = '止まりました。「入れる」か「続けて話す」'; };
