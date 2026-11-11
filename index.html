@@ -26,55 +26,62 @@ button.main{background:var(--accent);color:#fff;border-color:transparent}
 <div id="txt"></div>
 <div class="row">
 <button id="again" type="button">やり直す</button>
-<button id="done" class="main" type="button">入れる</button>
+<button id="done" class="main" type="button">入れる（Enter）</button>
 </div>
-<div id="note">話し終わって少し黙ると、自動でROVITAのコメント欄に入って閉じます。</div>
+<div id="note">喋り終わったら「入れる」かEnter。10秒黙った時も自動で入ります。途中で少し止まっても切れません。</div>
 <script>
 (function(){
+var SILENCE_MS = 10000;
 var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 var msg = document.getElementById('msg'), dot = document.getElementById('dot'), box = document.getElementById('txt');
-var finalText = '', tmpText = '', rec = null, timer = null, sent = false, listening = false;
+var finalText = '', tmpText = '', rec = null, timer = null, sent = false, stopping = false;
 var target = new URLSearchParams(location.search).get('o') || '';
 function show(){ box.innerHTML = ''; box.appendChild(document.createTextNode(finalText)); if (tmpText) { var s = document.createElement('span'); s.className = 'tmp'; s.textContent = tmpText; box.appendChild(s); } }
+function arm(){ clearTimeout(timer); timer = setTimeout(function(){ if ((finalText + tmpText).trim()) send(); }, SILENCE_MS); }
 function send(){
   if (sent) return;
   var t = (finalText + tmpText).trim();
-  if (!t) { msg.textContent = '聞き取れませんでした。「やり直す」を押してください'; return; }
-  sent = true;
+  if (!t) { msg.textContent = 'まだ何も聞き取れていません。話してください'; return; }
+  sent = true; stopping = true; clearTimeout(timer);
   try { if (rec) rec.stop(); } catch (e) {}
   if (window.opener && !window.opener.closed) {
     window.opener.postMessage({type:'rovita-mic', text:t}, target || '*');
     msg.textContent = 'コメント欄に入れました';
     setTimeout(function(){ window.close(); }, 300);
   } else {
-    msg.textContent = 'ROVITAの画面が見つかりません。文字を長押ししてコピーしてください';
+    msg.textContent = 'ROVITAの画面が見つかりません。文字を選んでコピーしてください';
     sent = false;
   }
 }
-function start(){
-  if (!SR) { msg.textContent = 'このブラウザは声の入力に対応していません（ChromeかEdgeで開いてください）'; return; }
-  finalText = ''; tmpText = ''; sent = false; show();
+function listen(){
   rec = new SR(); rec.lang = 'ja-JP'; rec.continuous = true; rec.interimResults = true;
-  rec.onstart = function(){ listening = true; dot.className = 'on'; msg.textContent = '聞いています。話してください'; };
+  rec.onstart = function(){ dot.className = 'on'; msg.textContent = '聞いています。話してください'; };
   rec.onresult = function(e){
     tmpText = '';
     for (var i = e.resultIndex; i < e.results.length; i++) {
       if (e.results[i].isFinal) finalText += e.results[i][0].transcript; else tmpText += e.results[i][0].transcript;
     }
-    show();
-    clearTimeout(timer);
-    timer = setTimeout(send, 2500);
+    show(); arm();
   };
   rec.onerror = function(e){
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') msg.textContent = 'マイクが許可されていません。アドレスバーの鍵の印からマイクを許可してください';
-    else if (e.error === 'no-speech') msg.textContent = '声が聞こえませんでした。「やり直す」を押してください';
-    else msg.textContent = 'うまく聞き取れませんでした（' + e.error + '）';
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { stopping = true; msg.textContent = 'マイクが許可されていません。アドレスバーの鍵の印からマイクを許可してください'; }
+    else if (e.error === 'no-speech' || e.error === 'aborted') {}
+    else msg.textContent = 'うまく聞き取れませんでした（' + e.error + '）。続けて話せます';
   };
-  rec.onend = function(){ listening = false; dot.className = ''; if (!sent && (finalText + tmpText).trim()) send(); };
+  rec.onend = function(){
+    dot.className = '';
+    if (tmpText) { finalText += tmpText; tmpText = ''; show(); }
+    if (!sent && !stopping) { setTimeout(function(){ if (!sent && !stopping) { try { listen(); } catch (e) {} } }, 150); }
+  };
   try { rec.start(); } catch (e) { msg.textContent = '始められませんでした。「やり直す」を押してください'; }
 }
-document.getElementById('again').onclick = function(){ clearTimeout(timer); try { if (rec) rec.abort(); } catch (e) {} start(); };
-document.getElementById('done').onclick = function(){ clearTimeout(timer); send(); };
+function start(){
+  if (!SR) { msg.textContent = 'このブラウザは声の入力に対応していません（ChromeかEdgeで開いてください）'; return; }
+  finalText = ''; tmpText = ''; sent = false; stopping = false; show(); listen();
+}
+document.getElementById('again').onclick = function(){ clearTimeout(timer); stopping = true; try { if (rec) rec.abort(); } catch (e) {} setTimeout(start, 200); };
+document.getElementById('done').onclick = function(){ send(); };
+document.addEventListener('keydown', function(e){ if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send(); } if (e.key === 'Escape') window.close(); });
 start();
 })();
 </script>
