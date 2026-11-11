@@ -25,64 +25,48 @@ button.main{background:var(--accent);color:#fff;border-color:transparent}
 <div id="state"><span id="dot"></span><span id="msg">準備しています…</span></div>
 <div id="txt"></div>
 <div class="row">
-<button id="again" type="button">やり直す</button>
+<button id="more" type="button">続けて話す</button>
+<button id="again" type="button">消して言い直す</button>
 <button id="done" class="main" type="button">入れる（Enter）</button>
 </div>
-<div id="note">喋り終わったら「入れる」かEnter。10秒黙った時も自動で入ります。途中で少し止まっても切れません。</div>
+<div id="note">自動では入りません。「入れる」かEnterを押した時だけ、ROVITAのコメント欄に入ります。Escで閉じます。</div>
 <script>
 (function(){
-var SILENCE_MS = 10000;
 var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 var msg = document.getElementById('msg'), dot = document.getElementById('dot'), box = document.getElementById('txt');
-var finalText = '', tmpText = '', rec = null, timer = null, sent = false, stopping = false;
+var kept = '', cur = '', tmp = '', rec = null, sent = false;
 var target = new URLSearchParams(location.search).get('o') || '';
-function show(){ box.innerHTML = ''; box.appendChild(document.createTextNode(finalText)); if (tmpText) { var s = document.createElement('span'); s.className = 'tmp'; s.textContent = tmpText; box.appendChild(s); } }
-function arm(){ clearTimeout(timer); timer = setTimeout(function(){ if ((finalText + tmpText).trim()) send(); }, SILENCE_MS); }
+function show(){ box.innerHTML = ''; box.appendChild(document.createTextNode(kept + cur)); if (tmp) { var s = document.createElement('span'); s.className = 'tmp'; s.textContent = tmp; box.appendChild(s); } }
+function stopRec(){ try { if (rec) { rec.onend = null; rec.onresult = null; rec.abort(); } } catch (e) {} rec = null; dot.className = ''; }
 function send(){
   if (sent) return;
-  var t = (finalText + tmpText).trim();
-  if (!t) { msg.textContent = 'まだ何も聞き取れていません。話してください'; return; }
-  sent = true; stopping = true; clearTimeout(timer);
-  try { if (rec) rec.stop(); } catch (e) {}
+  var t = (kept + cur + tmp).trim();
+  if (!t) { msg.textContent = 'まだ何も聞き取れていません'; return; }
+  sent = true; stopRec();
   if (window.opener && !window.opener.closed) {
     window.opener.postMessage({type:'rovita-mic', text:t}, target || '*');
-    msg.textContent = 'コメント欄に入れました';
-    setTimeout(function(){ window.close(); }, 300);
-  } else {
-    msg.textContent = 'ROVITAの画面が見つかりません。文字を選んでコピーしてください';
-    sent = false;
-  }
+    window.close();
+  } else { msg.textContent = 'ROVITAの画面が見つかりません。文字を選んでコピーしてください'; sent = false; }
 }
 function listen(){
-  rec = new SR(); rec.lang = 'ja-JP'; rec.continuous = true; rec.interimResults = true;
-  rec.onstart = function(){ dot.className = 'on'; msg.textContent = '聞いています。話してください'; };
-  rec.onresult = function(e){
-    tmpText = '';
-    for (var i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) finalText += e.results[i][0].transcript; else tmpText += e.results[i][0].transcript;
-    }
-    show(); arm();
-  };
-  rec.onerror = function(e){
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { stopping = true; msg.textContent = 'マイクが許可されていません。アドレスバーの鍵の印からマイクを許可してください'; }
-    else if (e.error === 'no-speech' || e.error === 'aborted') {}
-    else msg.textContent = 'うまく聞き取れませんでした（' + e.error + '）。続けて話せます';
-  };
-  rec.onend = function(){
-    dot.className = '';
-    if (tmpText) { finalText += tmpText; tmpText = ''; show(); }
-    if (!sent && !stopping) { setTimeout(function(){ if (!sent && !stopping) { try { listen(); } catch (e) {} } }, 150); }
-  };
-  try { rec.start(); } catch (e) { msg.textContent = '始められませんでした。「やり直す」を押してください'; }
-}
-function start(){
   if (!SR) { msg.textContent = 'このブラウザは声の入力に対応していません（ChromeかEdgeで開いてください）'; return; }
-  finalText = ''; tmpText = ''; sent = false; stopping = false; show(); listen();
+  stopRec(); kept = kept + cur + tmp; cur = ''; tmp = '';
+  var r = new SR(); rec = r; r.lang = 'ja-JP'; r.continuous = true; r.interimResults = true;
+  r.onstart = function(){ dot.className = 'on'; msg.textContent = '聞いています。話し終わったら「入れる」'; };
+  r.onresult = function(e){
+    var f = '', t = '';
+    for (var i = 0; i < e.results.length; i++) { if (e.results[i].isFinal) f += e.results[i][0].transcript; else t += e.results[i][0].transcript; }
+    cur = f; tmp = t; show();
+  };
+  r.onerror = function(e){ if (e.error === 'not-allowed' || e.error === 'service-not-allowed') msg.textContent = 'マイクが許可されていません。アドレスバーの鍵の印からマイクを許可してください'; };
+  r.onend = function(){ if (rec !== r) return; rec = null; dot.className = ''; kept = kept + cur + tmp; cur = ''; tmp = ''; show(); msg.textContent = '止まりました。「入れる」か「続けて話す」'; };
+  try { r.start(); } catch (e) { msg.textContent = '始められませんでした。「続けて話す」を押してください'; }
 }
-document.getElementById('again').onclick = function(){ clearTimeout(timer); stopping = true; try { if (rec) rec.abort(); } catch (e) {} setTimeout(start, 200); };
+document.getElementById('more').onclick = function(){ listen(); };
+document.getElementById('again').onclick = function(){ stopRec(); kept = ''; cur = ''; tmp = ''; show(); listen(); };
 document.getElementById('done').onclick = function(){ send(); };
 document.addEventListener('keydown', function(e){ if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send(); } if (e.key === 'Escape') window.close(); });
-start();
+listen();
 })();
 </script>
 </body>
